@@ -1,0 +1,1921 @@
+---
+title: "CITS4009 Project 2"
+subtitle: "Mingyu LIAN (24046428), Chensu YANG (24035732). Contribution: 50:50 "
+date: "2023-09-30"
+output: 
+  html_document:
+    theme: flatly
+    highlight: zenburn
+    toc: true
+    toc_float: true
+---
+
+```{=html}
+<style>
+.justify-text {
+  text-align: justify;
+  text-justify: inter-word; 
+}
+</style>
+```
+<div class="justify-text">
+
+# Introduction
+
+This Project is a further analysis of former project 1 (EDA project). Same data set will be applied and deeper data analytics methods will be practiced.
+
+The report will be divided into three main parts: data preparation, classification and clustering.
+
+In the first part, original data will be cleaned, transferred to reduce the noise and redundancy. Then, a target classification variable will be decided and proceeded by merging with economic data from World Bank. This part will deliver a decent data set for subsequent steps.
+
+In the second part, classification will be applied. The process will apply feature selection based on 3 methods: 1) Single variable (log-likelihood); 2) Boruta algrorithm; 3) Combination method (Chi-Square and correlation coefficient). 3 combinations of variables will be selected. After that, 3 multi-variables model are practiced to test the former 3 combinations, they are 1) Decision tree model; 2) XGBoost model; 3) Logistics regression model. Each model would be evaluated individually to find one of the best combination. Then, each model would be explained (Decision Tree by plot, XGBoost and Logistics Regression by LIME Interpreter). In the end, this 3 models from different combinations will be evaluated to gain a best variable combination and model.
+
+In the third part, clustering will be conducted. The first step is to proceed the data set as clustering is a unsupervised method without involving a target variable. Then 2 method: hierarchical clustering and K-means clustering will be conducted to group all the data into different clusters. Both of the methods will attempt to find the best K value and being explained.
+
+# 1. Data Preparation
+
+Import the packages will be used in the project:
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+library(ggplot2)
+library(dplyr)
+library(gridExtra)
+library(maps)
+library(tidyverse)
+library(maps)
+library(ggthemes)
+library(mice)
+library(ROCR)
+library(vtreat)
+library(ROCit)
+library(rpart)
+library(rpart.plot) 
+library(pander)
+library(class)
+library(xgboost)
+library(Boruta)
+library(caret)
+library(PerformanceAnalytics)
+library(lime)
+library(pROC)
+library(grDevices)
+library(fpc)
+library(vip)
+library(shiny)
+```
+
+Load the data set:
+
+```{r}
+##/Users/lianmingyu/Desktop/CITS4009 Computational Data Analysis/Project 1/Global YouTube Statistics.csv
+#~/Course/CITS4009 Computational Data Analysis/pj1/youtube_UTF_8.csv
+df <- read.csv('~/Course/CITS4009 Computational Data Analysis/pj1/youtube_UTF_8.csv', header =TRUE)
+```
+
+## 1.1 Data Glance and Assumptions
+
+First, as the former project did, the structure and summary function will be attempted to have a glance on the data:
+
+```{r}
+str(df)
+```
+
+```{r}
+summary(df)
+```
+
+Based on the glance of the structure and summary, there are 28 variables in total, contains 4 integer variables, 17 numeric variables and 7 character variables. 995 observations have been collected. Among these variables, the earning relevant variables will be transformed into a binary category variable as a target variable (known as Y) to apply the classification, other variables will be engineered and analysed the relationship with the target variable. In order to classify the income level, a data set of GDP from World Bank (2022) will be referred.
+
+In addition, from the glance and the understanding of the project, several assumptions will be listed as follow:
+
+1.  Inside the earning relevant variables, the average income is equal to (highest income + lowest income )/2.
+2.  For every country, the GDP per ca-pita will be referred to scale the income. The number of income/GDP will be used to generalize the income level: High income if the number of income/GDP is higher than average level, otherwise, it will be be classified as Low Income. For instance, if a Youtuber has the income is 50 times of the GDP of his/her country and the average of the time in all data set is 10, this Youtuber will be classified as High Income, if the one has the income is 5 times of the GDP, the one will be treated as Low Income.
+3.  The correlation between the target variable and other features are exist. The project will find the most approaching correlation.
+4.  Some variables are meaningless in the process that can be dropped. For instance, the Youtuber, rank relevant, abbreviation of country. These variables either repeat the similar information from other columns or stand for the unique characteristics, which cannot be used in the classification process.
+5.  The 'Country' relevant variables (such as 'Population','Unemployee Rate') has a strong and direct interplay with 'Country', that may lead the final model to an unbalanced tendency of 'Country', which contributing to the bias prediction. Therefore, all country relevant variables can be dropped and only keep 'Country'
+6.  The 'Country' variable can have the reflect features on 'Region' variable, which will be created based on the 'Country'.
+7.  There are some invalid/insensible values based on common sense. For instance, "nan", "NaN" in all variables; 0 in "video views", "uploads", and earning relevant variables; created year before 2000; observations that viewers/subscribers in the last 30 days are higher than all viewers/subscribers. All these values need to be proceeded for the further analysis.
+8.  "Channel Type" and "Category" are similar and overlapped, one of them can be dropped to reduce redundancy.
+
+The data cleaning, transformation and target variable proceed will be processed referring to assumptions above.
+
+## 1.2 Data Cleaning
+
+This process will be simplified as the project 1 has already explained. Same for Data Transformation part.
+
+The following steps will be conducted:
+
+1.  Drop the unnecessary columns
+2.  Convert insensible value to NA
+3.  Covert missing/NA to specific value
+4.  Delete some missing/NA (based on the quantity)
+5.  Fill the rest Null value
+
+```{r}
+#drop the redundant columns (value them to NULL)
+df$ rank <- NULL
+df$ Youtuber <-  NULL
+df$ Title <- NULL
+df$ Abbreviation <- NULL
+df$ video_views_rank <- NULL
+df$ country_rank <- NULL
+df$ channel_type_rank <- NULL
+df$channel_type <- NULL
+
+#drop variables that related to the country
+df$Longitude <- NULL
+df$Latitude <- NULL
+df$Urban_population <- NULL
+df$Unemployment.rate <- NULL
+df$Population <- NULL
+df$Gross.tertiary.education.enrollment.... <- NULL
+
+```
+
+```{r}
+#Convert insensible value to NA
+#covert the "NaN" and "nan" into NA for all columns
+df <- mutate_all(df, function(x) ifelse(x == "NaN", NA, x))
+df <- mutate_all(df, function(x) ifelse(x == "nan", NA, x))
+#covert the 0 in "video views" and "upload" into NA
+df <- mutate(df, video.views=na_if(video.views,0) )
+df <- mutate(df, uploads=na_if(uploads,0) )
+```
+
+```{r}
+#Check NA value in the data set
+nullcheck <- function(df) {
+       sapply  (df, function(x){ sum(is.na(x))}) 
+}
+nullcheck(df)
+```
+
+```{r}
+#replace the null in "country" to "Missing"
+df$Country <- ifelse(is.na(df$Country), "Missing", df$Country)
+
+#replace the null in "category" to "Missing"
+df$category <- ifelse(is.na(df$category), "Missing", df$category)
+
+```
+
+```{r}
+#Use mode to replace the null values in 3 date relevant variables 
+year_mode <- as.numeric(names(sort(table(df$created_year), decreasing = TRUE)[1]))
+df$created_year[is.na(df$created_year)] <- year_mode
+month_mode <- names(sort(table(df$created_month), decreasing = TRUE)[1])
+df$created_month[is.na(df$created_month)] <- month_mode
+date_mode <- as.numeric(names(sort(table(df$created_date), decreasing = TRUE)[1]))
+df$created_date[is.na(df$created_date)] <- date_mode
+```
+
+```{r}
+#find rows that viewers/subscribers in the last 30 days are higher than all viewers/subscribers
+sum(df$video_views_for_the_last_30_days > df$video.views, na.rm = TRUE)
+sum(df$subscribers_for_last_30_days > df$subscribers,na.rm = TRUE)
+```
+
+```{r}
+#use a new function to check the null and corresponding column/row straight forwardly
+plot_obj <- md.pattern(df, plot = TRUE, rotate.names = TRUE)
+plot_obj[2]
+```
+
+```{r}
+#delete this insensible rows and video views & video view for last 30 days is null 
+#that is because the number of these value is relatively less
+
+df <- subset(df, !(is.na(video_views_for_the_last_30_days) & video_views_for_the_last_30_days < video.views))
+df <- subset(df, video_views_for_the_last_30_days < video.views)
+df <- subset(df, !is.na(df$video.views))
+```
+
+```{r}
+plot_obj <- md.pattern(df, plot = TRUE, rotate.names = TRUE)
+plot_obj[2]
+```
+
+```{r}
+#use vtreat for the rest variables (numeric)
+varlist <- colnames(df)
+treatment_plan <- design_missingness_treatment( df, varlist = varlist) 
+df <- prepare(treatment_plan, df) 
+```
+
+```{r}
+#Check the null again
+plot_obj <- md.pattern(df, plot = TRUE, rotate.names = TRUE)
+plot_obj[2]
+```
+
+## 1.3 Data Transformation
+
+The data transformation contains following steps mainly, this step is also simplified as the former project has explained:
+
+1.  Transfer the yearly earning to average
+2.  Transfer the date relevant (combine to a full date and convert to numerical can be recognized by models)
+3.  Transfer the Country to Region (over number of level may lead to the stuck in model calculation especially the observation is relatively few)
+4.  Transfer the Category into more general categories (same reason as previous)
+5.  rename the variables (to make easier to understand)
+
+```{r}
+#Transfer the yearly earning to average. Drop the monthly earning as the Project 1 had discovered the direct positive correlation between monthly and yearly earning.
+df$avg_yearlyearning <- (df$highest_yearly_earnings+df$lowest_yearly_earnings)/2
+df$ highest_monthly_earnings <- NULL
+df$ lowest_monthly_earnings <- NULL
+df$ highest_yearly_earnings <- NULL
+df$ lowest_yearly_earnings <- NULL
+
+```
+
+```{r}
+#transform date relavant variables as combination and drop the used columns
+#in order to deliver the create date info into the predict model, convertn them into numerical
+numbermonth <- c("Jan" = 1, "Feb" = 2, "Mar" = 3, "Apr" = 4, "May" = 5, "Jun" = 6, "Jul" = 7, "Aug" = 8, "Sep" = 9, "Oct" = 10, "Nov" = 11, "Dec" = 12)
+df$created_month <- numbermonth[df$created_month]
+df$created_time <- as.Date(paste(df$created_year, df$created_month, df$created_date, sep = "-"))
+#drop the colmns that already been transformed
+df$ created_year <- NULL
+df$ created_month <- NULL
+df$ created_date <- NULL
+```
+
+```{r}
+#in order to deliver the create date info into the predict model, convert them into numerical
+df$numeric_date = as.numeric(df$created_time)
+df$created_time <- NULL
+```
+
+```{r}
+#Select top 30 countries as the count
+df%>% 
+  count(Country, sort = TRUE) %>% 
+  top_n(n=30,wt=n)
+```
+
+```{r}
+#group the top 30 countires into Region
+region_map <- data.frame(
+  Country = c("United States","India","Brazil","United Kindom","Mexico","Indonesia","Spain","Thailand","Russia","South Korea","Argentina","Canada","Colombia","Philippines","Australia","Saudi Arabia","Ukraine","France", "Germany","Japan","Pakistan","United Arab Emirate","Chile","Jordan","Netherlands","Sweden","Turkey", "Vietnam","Ecuador", "Egypt"),
+  
+  region = c("North America", "South Asia","South America", "Europe","South America", "Asia Pacific", "Europe", "Asia Pacific", "Europe","Asia Pacific","South America", "North America", "South America", "Asia Pacific","Asia Pacific", "Middle East", "Europe", "Europe", "Europe", "Asia Pacific", "South Asia", "Middle East", "South America", "Middle East", "Europe", "Europe", "Middle East", "Asia Pacific", "South America", "Middle East")
+)
+
+df <- df %>%
+  left_join(region_map, by = "Country") %>% 
+  mutate(region = ifelse(is.na(region), "Others", region))
+```
+
+```{r}
+#list all the level of category, there are 20 levels
+unique(df$category)
+```
+
+```{r}
+#change them into a more general category to reduce the levels as the high amount of level in the little amount of abservaition may cause stuck in the model, after transfer, there is 14 levels
+categorymap <- data.frame(
+  category = c("Howto & Style","Entertainment","Music","Comedy", "Gaming","Film & Animation","Education", "Sports", "News & Politics","People & Blogs" , "Nonprofits & Activism" ,"Autos & Vehicles","Science & Technology" , "Shows" , "Trailers", "Missing","Movies" ,"Travel & Events","Pets & Animals"), newcate =c("Howto & Style","Entertainment","Music","Entertainment", "Gaming" ,"Film & Animation","Education", "Sports", "News & Politics","People & Blogs" , "Nonprofits & Activism" ,"Autos & Vehicles","Education" , "Entertainment","Entertainment", "Missing","Film & Animation" ,"Entertainment","Pets & Animals"))
+
+df <- df %>%
+  left_join(categorymap, by = "category") %>% 
+  mutate(newcate = ifelse(is.na(newcate), "Others", newcate))
+
+```
+
+```{r}
+df$category <- NULL
+```
+
+```{r}
+#rename variables
+df <- rename(df, category = newcate)
+df <- rename(df, country = Country)
+df <- rename(df, views = video_views)
+df <- rename(df, last_month_subscribe = subscribers_for_last_30_days)
+df <- rename(df, last_month_view = video_views_for_the_last_30_days)
+```
+
+## 1.4 Target Variable Proceed
+
+In this process, the yearly income data will be generalized by the 2022 GDP data, which is referred and merged from World Bank. As the original data is not perfect and exists several missing value, this data will also be proceed. There are following main steps:
+
+1.  Import GDP data
+2.  GDP data clean and transformation
+3.  Merging and proceed final
+4.  Generalize income and deliver a valid target variable.
+
+```{r}
+#import original GDP data
+#/Users/lianmingyu/Downloads/API_NY/API_NY.GDP.PCAP.CD_DS2_en_csv_v2_5871588.csv
+#~/Course/CITS4009 Computational Data Analysis/pj2/API_NY.GDP.PCAP.CD_DS2_en_csv_v2_5871588.csv
+gdp <- read.csv('~/Course/CITS4009 Computational Data Analysis/pj2/API_NY.GDP.PCAP.CD_DS2_en_csv_v2_5871588.csv', header =TRUE, skip = 4)
+```
+
+```{r}
+#GDP data cleaning and transformation
+#several country dismatch in the original data, change the country name of these
+#convert Korea into South Korea
+gdp$Country.Name[gdp$Country.Name == "Korea, Rep."] <- "South Korea"
+#convert Russia into Russian Federation
+gdp$Country.Name[gdp$Country.Name == "Russian Federation"] <- "Russia"
+#convert Turkiye into Turkey
+gdp$Country.Name[gdp$Country.Name == "Turkiye"] <- "Turkey"
+#convert venezuela, rb into Venezuela
+gdp$Country.Name[gdp$Country.Name == "Venezuela, RB"] <- "Venezuela"
+#convert egypt, arab rep. into Egypt
+gdp$Country.Name[gdp$Country.Name == "Egypt, Arab Rep."] <- "Egypt"
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+
+#Drop the useless columns and just select country and GDP in 2022
+exclude_columns <- names(gdp)[2:48]
+columns_to_impute <- c( "X2022")
+
+# Use MICE function. Analyse the historical gdp data and make prediction of 2022 to fill the missing value in 2022 gdp using random foreset method.
+miceMod <- mice(gdp[, !names(gdp) %in% exclude_columns], 
+                method = "rf", )
+miceOutput <- complete(miceMod)
+
+```
+
+After the simple proceed of GDP data, it can be merged with the df.
+
+```{r}
+#merge the two data set and rename the 2022 gdp column as 'gdp'
+gdp <- miceOutput[c("Country.Name", "X2022")]
+df <- merge(df, gdp, by.x = "country", by.y = "Country.Name", all.x = TRUE)
+df <- rename(df, gdp = X2022)
+```
+
+```{r}
+#after merging, there should be null value in gdp for 'Missing' country coulmn
+#Use median to fill the null value in gpd
+df$gdp[is.na(df$gdp)] <- median(df$gdp, na.rm = TRUE)
+```
+
+```{r}
+#Check the null value of merged data frame
+plot_obj <- md.pattern(df, plot = TRUE, rotate.names = TRUE)
+plot_obj[2]
+
+```
+
+```{r}
+#normalize the income by GDP per capita 
+df$normalizeincome <- df$avg_yearlyearning/df$gdp
+
+#set the income to income_class (target variable) according to the comparison with GDP, if lower than average time of income/GDP, will be set as 0, otherwise will be set as 1
+df$income_class <- ifelse(df$normalizeincome < median(df$normalizeincome), 0, 1)
+
+```
+
+```{r}
+#in the last, delete average income,normalizeincome, gdp column as they have already contributed to the target valiable generation.
+#besides, as discussed, the 'country' will also be droped as it contains over amount of levels that may lead to a unefficiency and stuck in the further model development, the information on coutnry will be reflected on the 'region' variable.
+df$normalizeincome <- NULL
+df$avg_yearlyearning <- NULL
+df$gdp <- NULL
+df$country <- NULL
+```
+
+```{r}
+#check the distribution (count and proportion) of the income_class
+table(df$income_class)
+round(prop.table(table(df$income_class)), 2)
+```
+
+After a series of data proceeding, the noise data and redundant variable has been removed, the target variable has been determined and generated. 9 out of all variables are kept as they are suitable to conduct classification or clustering with. The target variable can imply whether the Youtuber has a higher or lower income comparing to the average income in their own country. In addition, the distribution of the binary level are half-half, which is suitable for the subsequent classification process.
+
+# 2. Classification
+
+Classification is an supervised process that building model to find the relationship between independent variables and dependent variable. In this report, 9 variables will be used to predict a binary classification variable called 'income_class', the high income will show as 1 and low income will show as 0. Here lists the main steps in classification phase:
+
+1.  Data split and prepare
+2.  Three Feature selection methods (Single variable log-likelihood, Boruta algorithm, combination of Chi-square and correlation coefficient)
+3.  Three multiple variables models building (Decision tree, XGBoost, Logistics Regression)
+4.  Evaluation for all settings
+
+## 2.1 Data Split and Type Split
+
+In this process, the data will be split into 2 parts first: dTrainAll, dTest. Then dTrainAll will be split to dTrain as final training data set and dCal as calibration data set. The proportion is always 80% and 20% respectively.
+
+In the feature selection and model development step, dTrain will be used to train model, dCal will be used to assess the model inside each process. Only in the final step, dTest will be used on the final 3 variables combinations \* 3 model to evaluate which setting perform best. However, as the original data has limited observation, the high variance situation (over-fitting) may occur in a high possibility, a method called Cross-Validation will be introduced in the practical process.
+
+In addition, based on the type of different variables, they will be grouped in order to fit the model algorithm.
+
+```{r}
+#split to all train data and test data
+set.seed(40094009)
+df$rgroup <- runif(dim(df)[1])
+dTrainAll <- subset(df, rgroup<=0.8)
+dTest <- subset(df, rgroup>0.8)
+
+#group the variables into numeric and category based on the type, also define the outcome variable
+valid_columns <- setdiff(colnames(dTrainAll), c('income_class', 'rgroup')) 
+catvars <- valid_columns[sapply(dTrainAll[, valid_columns], class) %in%
+c('factor', 'character')]
+numvars <- valid_columns[sapply(dTrainAll[, valid_columns], class) %in%
+c('numeric', 'integer')]
+outcome <- c("income_class")
+pos <- '1'
+
+#split the dTrainAll into training set and validation (calibration) set
+useForCal <- rbinom(n=dim(dTrainAll)[1], size=1, prob=0.2)>0 
+dCal <- subset(dTrainAll, useForCal)
+dTrain <- subset(dTrainAll, !useForCal)
+
+#delete Rgroup as useless after spliting
+df$rgroup <- NULL
+```
+
+## 2.2 Feature Selection
+
+Feature selection is an essential step of model building, which helps to enhance the model performance by removing the variables that are not correlated to the outcome. It helps to keep the model away from the impacts from noise and deviation elements. This project aims to find out the best variable combinations to generate the best classification model.
+
+Three feature selection methods are used in the following codes for the further multivariable modeling part. The method includes Boruta Algorithm, Log-likelihood and the combination of correlation coefficient and chi-square tests. Although the selected variables are mostly the same, the performance is slightly different during the evaluation.
+
+### 2.2.1 Feature Selection 1 - Single Variable (log-likelihood)
+
+Single variable method is a method to find the good performed single variables by listing each of the independent variable's performance. In another word, use each of single variable to conduct a model building, gain a series of single variable models as many as the quantity of variables, then evaluate each models to find well performed ones. The corresponded variable of the well-performed model will be selected as the feature in the classification.
+
+In this project, ROC/AUC chart and log-likelihood will be applied to evaluate how each variable performs (or what extent of impacts each variable will have on the final target variable - income_class). By this process, a combination of features will be selected base on the evaluation method.
+
+Besides, as the quantity of observations is relatively low (only around 1000), there is a high possibility for the computer to build an over-fitting model. Therefore, cross-validation method will be practiced here in order to prevent the case that selecting an over-fitting model and variable.
+
+Therefore, as the single variable selection is complex, the project will step as the following parts:
+
+1.  create single variable model for category and numerical variables
+2.  set null model to make comparison
+3.  use AUC/ROC to evaluate variables and gain some well-performed variables
+4.  use log-likelihood to evaluate variables and gain some well-performed variables
+5.  apply cross validation to avoid over-fitting
+6.  apply double density plot to check the density
+7.  Decide the final selected variables
+
+#### 2.2.1.1 Single Variable Model (Category & Numerical) and Evaluation
+
+```{r}
+#set the single variable model function
+mkPredC <- function(outCol,varCol,appCol) {
+  pPos <- sum(outCol==pos)/length(outCol)
+  naTab <- table(as.factor(outCol[is.na(varCol)]))
+  pPosWna <- (naTab/sum(naTab))[pos]
+  vTab <- table(as.factor(outCol),varCol)
+  pPosWv <- (vTab[pos,]+1.0e-3*pPos)/(colSums(vTab)+1.0e-3)
+  pred <- pPosWv[appCol]
+  pred[is.na(appCol)] <- pPosWna
+  pred[is.na(pred)] <- pPos
+  pred
+}
+```
+
+```{r}
+#Conduct model for category variables
+for(v in catvars) 
+{ pi <- paste('pred', v, sep='') 
+  dTrain[,pi] <- mkPredC(dTrain[,outcome], dTrain[,v], dTrain[,v]) 
+  dCal[,pi] <- mkPredC(dTrain[,outcome], dTrain[,v], dCal[,v]) 
+  dTest[,pi] <- mkPredC(dTrain[,outcome], dTrain[,v], dTest[,v]) }
+```
+
+```{r}
+#Set AUC function to evaluate the catvariables performance
+calcAUC <- function(predcol, outcol) {
+  perf <- performance(prediction(predcol, outcol==pos),'auc')
+  as.numeric(perf@y.values)
+}
+```
+
+```{r}
+#rank as the AUC for category variables (as the null model will perform 0.5 of AUC, so extract the varibales have better performance than null model which is AUC >= 0.5)
+for (x in catvars) {
+  pii <- paste('pred', x, sep = '')
+  aucTrain <- calcAUC(dTrain[, pii], dTrain[, outcome])
+  if (aucTrain >= 0.50) {
+    aucCal <- force(calcAUC(dCal[, pii], dCal[, outcome]))
+    print(sprintf(
+      "%s, trainAUC: %4.3f calibrationAUC: %4.3f",
+      pii, aucTrain, aucCal))
+  }
+}
+```
+
+A null model will be set and check the AUC as if any of single variable model has the worse performance than null model, it will be treat as meaningless, since null model can not perform better than the selected variable:
+
+```{r}
+#Null Model
+(Npos <- sum(dTrain[,outcome] == 1)) 
+pred.Null <- Npos / nrow(dTrain) 
+cat("Proportion of outcome == 1 in dTrain:", pred.Null)
+
+TP <- 0; TN <- sum(dCal[,outcome] == -1); 
+FP <- 0; FN <- sum(dCal[,outcome] == 1); 
+cat("nrow(dCal):", nrow(dCal), "TP:", TP, "TN:", TN, "FP:", FP, "FN:", FN) 
+(accuracy <- (TP + TN) / nrow(dCal)) 
+(precision <- TP/(TP + FP))
+(recall <- TP/(TP + FN)) 
+pred.Null <- rep(pred.Null, nrow(dCal)) 
+(AUC <- calcAUC(pred.Null, dCal[,outcome])) 
+
+```
+
+```{r}
+#Conduct model for numeric variables (similar as category)
+
+mkPredN <- function(outCol,varCol,appCol) {
+  cuts <- unique(as.numeric(quantile(varCol, probs=seq(0, 1, 0.1), na.rm=T)))
+  varC <- cut(varCol, cuts)
+  appC <- cut(appCol, cuts)
+  mkPredC(outCol, varC, appC)
+}
+
+for(v in numvars) {
+  pii<-paste('pred',v,sep='')
+  dTrain[,pii] <- mkPredN(dTrain[,outcome], dTrain[,v], dTrain[,v])
+  dTest[,pii] <- mkPredN(dTrain[,outcome], dTrain[,v], dTest[,v])
+  dCal[,pii] <- mkPredN(dTrain[,outcome], dTrain[,v], dCal[,v])
+  aucTrain <- calcAUC(dTrain[,pii],dTrain[,outcome])
+  
+  if(aucTrain>=0.5) {
+    aucCal<-calcAUC(dCal[,pii],dCal[,outcome])
+    print(sprintf(
+      "%s, trainAUC: %4.3f calibrationAUC: %4.3f",
+      pii,aucTrain,aucCal))
+  }
+}
+```
+
+Also, ROC plot will be plotted to see the performance straightforwardly, the more the line is up and right, indicates the variable has higher AUC, which means it can predict the target variable better:
+
+```{r}
+plot_roc <- function(predcol, outcol, colour_id=2, overlaid=F){ 
+  ROCit_obj <- rocit(score=predcol, class=outcol==pos) 
+  par(new=overlaid) 
+  plot(ROCit_obj, 
+  col = c(colour_id, 1), legend = FALSE, YIndex = FALSE, values = FALSE) 
+}
+
+plot_roc(dCal$predregion, dCal[,outcome],colour_id=1)  
+plot_roc(dCal$predlast_month_view, dCal[,outcome], colour_id=2, overlaid=T) 
+plot_roc(dCal$preduploads, dCal[,outcome],colour_id=3,overlaid=T) 
+plot_roc(dCal$predlast_month_subscribe, dCal[,outcome], colour_id=4, overlaid=T) 
+
+# Add a legend
+legend("topright", legend = c("region", "lst_mth_view", "uploads", "lst_mth_subscribe"), col = 1:4, lty = 1)
+```
+
+```{r include=FALSE}
+shiny1 <- dCal
+```
+
+Based on the ROC evaluation (number and charts) for category and numeric variable, there are several variables perform well with AUC/ROC of calibration data: region in category, last month subscribe and last month view in numeric.
+
+Then, **Log-likelihood** method will be conduct to select the variables to see if can obtain same results:
+
+```{r}
+#log-likelyhood
+#first calculate the loglikelihood of null model, the single variable model's log-likelihood value should be higher than the null model log-likelihood
+logLikelihood <- function(ytrue, ypred, epsilon=1e-6) { 
+  sum(ifelse(ytrue==pos, log(ypred+epsilon), log(1-ypred-epsilon)), na.rm=T) 
+  } 
+# Compute the likelihood of the Null model on the calibration 
+# set (for the KDD dataset from previous lecture) 
+outcome <- 'income_class' 
+logNull <- logLikelihood( dCal[,outcome], sum(dCal[,outcome]==pos)/nrow(dCal) )
+cat(logNull) 
+```
+
+```{r}
+#run through categorical variables, and calcuate how much the variable is higher than the null model log-likelihood. The higher mark, the better performance. 
+selCatVars <- c() 
+minDrop <- 10
+
+for (v in catvars)
+{ pi <- paste('pred', v, sep='') 
+  devDrop <- 2*(logLikelihood(dCal[,outcome], dCal[,pi]) - logNull) 
+  if (devDrop >= minDrop) 
+  { 
+    print(sprintf("%s, deviance reduction: %g", pi, devDrop))
+    selCatVars <- c(selCatVars, pi) 
+  } 
+  }
+```
+
+```{r}
+#run through numerical variables as similar way
+selNumVars <- c() 
+minDrop <- 10 
+# may need to adjust this number 
+for (v in numvars) 
+{ 
+  pi <- paste('pred', v, sep='')
+  devDrop <- 2*(logLikelihood(dCal[,outcome], dCal[,pi]) - logNull) 
+  if (devDrop >= minDrop) { 
+    print(sprintf("%s, deviance reduction: %g", pi, devDrop))
+    selNumVars <- c(selNumVars, pi) 
+  } 
+}
+```
+
+```{r}
+#therefore, the log likelihood select 5 variables 
+selNumVars
+selCatVars
+selVars <- c(selNumVars,selCatVars)
+```
+
+In conclusion, in the first phase of single variable model method, the ROC/AUC evaluation method and log-likelihood method obtain similar output combination.
+
+However, as mentioned above, the method may contains over-fitting problem due to the limited observations. Therefore, here introduce Cross-Validation to check how much of the average AUC/ROC and the deviation of them, based on which, the final feature selection can be conduct with preventing the over-fitting problem.
+
+#### 2.2.1.2 Cross Validation
+
+Cross validation is a method splitting data randomly by a specific number of time, and for each time of split, calculate the performance of the variable. Then calculate the overall performance of each single variable.
+
+This method can detect the over-fitting single variable effectively: Compare the average AUC with the original AUC, if the difference is huge, it indicate the first round of single variable model building may leading to unstable performance . Otherwise, it shows that all models (different split) for the variable perform similar and less possibility to trigger the over-fitting problem.
+
+```{r}
+#cross validation check
+vars <- c('region' , 'last_month_subscribe', 'last_month_view', 'uploads',"subscribers_for_last_30_days_isBAD")
+for (var in vars) 
+{ aucs <- rep(0,100) 
+  for (rep in 1:length(aucs))
+  { useForCalRep <- rbinom(n=nrow(dTrainAll), size=1, prob=0.1) > 0 
+    predRep <- mkPredC(dTrainAll[!useForCalRep, outcome], 
+                       dTrainAll[!useForCalRep, var], 
+                       dTrainAll[useForCalRep, var]) 
+    aucs[rep] <- calcAUC(predRep, dTrainAll[useForCalRep, outcome]) } 
+print(sprintf("%s: mean: %4.3f; sd: %4.3f", var, mean(aucs), sd(aucs))) }
+
+# select region and last_month_subscribe for cross validation
+
+```
+
+Based on the Cross-validation, the variable 'subscribers_for_last_30_days_isBAD' and variable 'uploads' shows a relatively high difference with the original AUC, and relatively high sd. It implies the contingency of these two variable. Therefore, although both of variables showed a decent performance, they may bring latent over-fitting problem. It better not to select variable 'subscribers_for_last_30_days_isBAD' and variable 'uploads' into the feature selection combination.
+
+#### 2.2.1.3 Single Variable Plots
+
+In this step, double density plot will be plotted to check the distribution of the three selected variables (region, last_month_subscribe, last_month_subscribe)
+
+```{r}
+#double density plot for 3 varibales (change to factor type first)
+str(factor(dTrain[,"region"])) 
+str(factor(dTrain[,"last_month_subscribe"])) 
+str(factor(dTrain[,"last_month_view"])) 
+fig1 <- ggplot(dCal) + geom_density(aes(x=predregion, color=as.factor(income_class))) + labs(title = "Double Desnity Plot for Region")
+fig2 <- ggplot(dCal) + geom_density(aes(x=predlast_month_subscribe , color=as.factor(income_class))) + labs(title = "Double Desnity Plot for Last Month Subscribe")
+fig3 <- ggplot(dCal) + geom_density(aes(x=predlast_month_view, color=as.factor(income_class))) + labs(title = "Double Desnity Plot for Last Month View")
+```
+
+```{r}
+#region double density plot
+fig1
+```
+
+```{r}
+#Lst month subscribe double density plot
+fig2
+```
+
+```{r}
+#Lst month view double density plot
+fig3
+```
+
+From the three charts above, all of the three variables show different distribution when the income_class is different:
+
+1.  For variable region, low income occurs more when the region is in the factor 0-0.4, and the gap is huge.
+2.  For variable last month subscribe, high income is more when the factor is high than 0.7, on the contrary, low income is more when the factor is less than 0.4.
+3.  For variable last month view, although there are similar density in the range of 0.25-0.75, there are still notable differences in the two poplars of the charts.
+
+Therefore, all of the three variables selected can be deliver to next step as each of them have differential impacts on the target variable.
+
+#### 2.2.1.4 Feature Selection 1 Conclusion
+
+In summary, via the complex analysis of single variable (model), there are around 5 variables are selected in the ROC and log-likelihood evaluation. However, the cross validation method filter out 2 variables to prevent potential over-fitting scenario. The remaining 3 variables are kept and they show a great performance in the double density plot.
+
+```{r}
+#clarify the final selection of the feature (Combination 1)
+selNumVars <- c("predregion")
+selCatVars <- c("predlast_month_subscribe" ,"predlast_month_view"   )
+selVars <- c(selNumVars,selCatVars)
+selVars
+```
+
+### 2.2.2 Feature Selection 2 - Boruta Algorithm
+
+Boruta Algorithm works as a wrapper algorithm around random forest. It creates randomness to the given data set by making shadow features with shuffled features. Then it evaluates each features' importance after a random forest classifier is trained. It will select the features which has higher importance than the best shadow feature (after several iterations it will generate the result when every feature is confirmed or rejected).
+
+The code following put the features into Boruta algorithm to evaluate and select the well performed. The status of every features could be checked by the stats printed below.
+
+```{r message=FALSE, warning=FALSE}
+df_bo <- dTrain %>%
+  select(all_of(c(catvars,numvars, outcome)))
+Bo <- Boruta(income_class~.,data = df_bo,pValue = 0.01,doTrace=2,maxRuns = 20)
+```
+
+```{r}
+# check the status by the decision column
+stats_df <- attStats(Bo)
+print(stats_df)
+```
+
+A plot is generated to show how the features performed. Obviously as below plot, "region" and " last_month_view" have distinctive performance and "category" and "subscribers" are rejected because of the importance of that is lower than the best shadow feature.
+
+```{r}
+# generate the plot for showing the feature weight.
+plot(Bo, xlab = "", xaxt = "n")
+lz<-lapply(1:ncol(Bo$ImpHistory),function(i)
+Bo$ImpHistory[is.finite(Bo$ImpHistory[,i]),i])
+names(lz) <- colnames(Bo$ImpHistory)
+Labels <- sort(sapply(lz,median))
+axis(side = 1,las=2,labels = names(Labels),
+at = 1:ncol(Bo$ImpHistory), cex.axis = 0.7)
+```
+
+In conclusion, the Boruta Algorithm selected 7 features as the names nominated by "selVar2" below.
+
+```{r}
+selVar2 <- getSelectedAttributes(Bo, withTentative = F)
+selVar2
+```
+
+### 2.2.3 Feature Selection 3 - Combination of Chi-Square & Correlation Coefficient
+
+Two evaluation methods will be combined and applied: the chi-squared test will be used for categorical features, and the correlation experiment will be used for numerical features. The combination of the method will deliver a set of selected features.
+
+First apply Chi-square function for category features:
+
+```{r warning=FALSE}
+#Chi-square function
+chisq.test(dTrain$category, dTrain$income_class)
+chisq.test(dTrain$region, dTrain$income_class)
+```
+
+From the stats above, "region" is significantly high performed in the Chi-squared test, which would be add into the following process. "category" would be abandoned due to the high p-value and low X-squared score.
+
+Then apply correlation coefficient for numerical features:
+
+```{r warning=FALSE}
+#correlation coefficient function
+df_num <- dTrain %>%
+  select(all_of(c(numvars, outcome)))   
+chart.Correlation(df_num, histogram=TRUE, pch=19)
+```
+
+The above plot shows the performance of each numerical variable. According to the plot, almost every feature is well performed for the further use except for the "subscirbers_for_the_last_30_days_isBAD". Besides, the result of chi-square test shows that region is the best categorical feature with high performance and very low p-value. In addition, the coefficient between views and subscribers is very high (also last_month features also). However, the value is still reasonable for the further use, so these features will still be kept.
+
+```{r warning=FALSE}
+selVar3 <- c(setdiff(numvars, "gdp"), "region")
+selVar3
+
+```
+
+Finally, 8 features are selected from this selection period, which would used for the multivariable models to process by these 2 feature selection method.
+
+### 2.2.4 Summary of Features Selection
+
+The information below shows the result of the feature selection. From loglikelyhood there were 3 features selected: 'last_month_view", "last_month_subscribe',"region". Boruta Algorithms expelled "category" and "subscribers" and contains 7 variables including "views", "uploads", "subscribers_for_last_30_days_isBAD" and "numeric_date". With the chi-square test and correlation, one addition feature was selected which is "subscribers".
+
+```{r}
+#loglikelyhood
+selVars <- substr(selVars, start = 5, stop = nchar(selVars))
+selVars
+```
+
+```{r}
+#Boruta
+selVar2
+```
+
+```{r}
+#correlation and chi-square tested
+selVar3
+```
+
+## 2.3 Multiple Variables Model Develop
+
+Three models would be used for the multi-variable models training:
+
+1.  Decision Tree
+2.  XGBoost
+3.  Logistic Regression.
+
+The data frame has been split to the training data in the previous steps, calibration data and test data, and generate 3 copies for the three combinations of features. Then put them into the models and train them with 3 different algorithms including Decision Tree, XGBoost and Logistic Regression. The result of each model would be evaluated by different methods, such as AUC/ROC curve, confusion matrix, accuracy, precision, recall and F1 score.
+
+After the evaluation, the three best models would be selected and put into one plot for further comparison.
+
+Before all of the processing, we refreshes the training data ,calibration data and test data for 3 data sets.
+
+```{r include=FALSE}
+#split to all train data and test data
+set.seed(40094009)
+df$rgroup <- runif(dim(df)[1])
+dTrainAll <- subset(df, rgroup<=0.8)
+dTest <- subset(df, rgroup>0.8)
+
+outcome <- c("income_class")
+
+#split the dTrainAll into training set and validation (calibration) set
+useForCal <- rbinom(n=dim(dTrainAll)[1], size=1, prob=0.2)>0 
+dCal <- subset(dTrainAll, useForCal)
+dTrain <- subset(dTrainAll, !useForCal)
+```
+
+```{r}
+#arrage 3 data set the data (simply copy)
+dTrain1 <- dTrain %>%
+  select(all_of(c(selVars, outcome)))
+dTrain2 <- dTrain %>%
+  select(all_of(c(selVar2, outcome)))
+dTrain3 <- dTrain %>%
+  select(all_of(c(selVar3, outcome)))
+
+dTest1 <- dTest %>%
+  select(all_of(c(selVars, outcome)))
+dTest2 <- dTest %>%
+  select(all_of(c(selVar2, outcome)))
+dTest3 <- dTest %>%
+  select(all_of(c(selVar3, outcome)))
+
+dCal1 <- dCal %>%
+  select(all_of(c(selVars, outcome)))
+dCal2 <- dCal %>%
+  select(all_of(c(selVar2, outcome)))
+dCal3 <- dCal %>%
+  select(all_of(c(selVar3, outcome)))
+```
+
+### 2.3.1 Decision Tree Model
+
+The Decision Tree Model is a supervised learning method for classification, which predicts the value by using decision rules. Decision Tree Model could be explained simply so there is no need to use an interpretation model.
+
+The Decision Tree Model process was divided into parts including:
+
+1.  The creation of models and it's AUC evaluation for each feature combination
+2.  The performance evaluation of the three models (precision, recall, f1, dev.norm)
+3.  The plot for comparison.
+4.  The diagram show how the model works and the explanation of the model.
+
+#### 2.3.1.1 The Model Creation
+
+```{r, warning=FALSE}
+# Decision Tree First Evaluation
+(fV <- paste(outcome,'> 0 ~ ', paste(selVars, collapse=' + '), sep='')) 
+t1model <- rpart(fV, data=dTrain1) 
+print(calcAUC(predict(t1model, newdata=dTrain1), dTrain1[,outcome])) 
+print(calcAUC(predict(t1model, newdata=dTest1), dTest1[,outcome])) 
+print(calcAUC(predict(t1model, newdata=dCal1), dCal1[,outcome])) 
+```
+
+```{r, warning=FALSE}
+# Decision Tree Second Evaluation
+(fV <- paste(outcome,'> 0 ~ ', paste(selVar2, collapse=' + '), sep='')) 
+t2model <- rpart(fV, data=dTrain2) 
+print(calcAUC(predict(t2model, newdata=dTrain2), dTrain2[,outcome])) 
+print(calcAUC(predict(t2model, newdata=dTest2), dTest2[,outcome])) 
+print(calcAUC(predict(t2model, newdata=dCal2), dCal2[,outcome])) 
+
+```
+
+```{r, warning=FALSE}
+# Decision Tree Third Evaluation
+(fV <- paste(outcome,'> 0 ~ ', paste(selVar3, collapse=' + '), sep='')) 
+t3model <- rpart(fV, data=dTrain3) 
+print(calcAUC(predict(t3model, newdata=dTrain3), dTrain3[,outcome]))
+print(calcAUC(predict(t3model, newdata=dTest3), dTest3[,outcome])) 
+print(calcAUC(predict(t3model, newdata=dCal3), dCal3[,outcome])) 
+```
+
+From the AUC calculated above, the information indicates that the AUC value from 3 models are almost the same although different variable combinations are used, dispite the first one is slightly lower. One hypothesis for this phenomenon could be explained that the model might ignore some features contributing to the differential result.
+
+#### 2.3.1.2 The Performance evaluation (precision, recall, f1, dev.norm)
+
+```{r}
+logLikelihood <- function(ytrue, ypred, epsilon=1e-6) 
+{ sum(ifelse(ytrue, log(ypred+epsilon), log(1-ypred+epsilon)), na.rm=T) }
+performanceMeasures <- function(ytrue, ypred, model.name = "model", threshold=0.5) 
+{ # compute the normalised deviance 
+  dev.norm <- -2 * logLikelihood(ytrue, ypred)/length(ypred) 
+  # compute the confusion matrix 
+  cmat <- table(actual = ytrue, predicted = ypred >= threshold) 
+  accuracy <- sum(diag(cmat)) / sum(cmat) 
+  precision <- cmat[2, 2] / sum(cmat[, 2]) 
+  recall <- cmat[2, 2] / sum(cmat[2, ]) 
+  f1 <- 2 * precision * recall / (precision + recall) 
+  data.frame(model = model.name, 
+             precision = precision, recall = recall, f1 = f1, dev.norm = dev.norm) }
+```
+
+```{r}
+# evaluation function
+panderOpt <- function(){
+  panderOptions("plain.ascii", TRUE) 
+  panderOptions("keep.trailing.zeros", TRUE) 
+  panderOptions("table.style", "simple") }
+
+pretty_perf_table <- function(model, xtrain, ytrain, xtest, ytest, threshold=0.5) {
+  # Option setting for Pander 
+  panderOpt()
+  perf_justify <- "lrrrr" 
+  # call the predict() function to do the predictions
+  pred_train <- predict(model, newdata=xtrain) 
+  pred_test <- predict(model, newdata=xtest) 
+  # comparing performance on training vs. test 
+  trainperf_df <- performanceMeasures( ytrain, pred_train, model.name="training", threshold=threshold)
+  testperf_df <- performanceMeasures( ytest, pred_test, model.name="test", threshold=threshold)
+  # combine the two performance data frames using rbind() 
+  perftable <- rbind(trainperf_df, testperf_df) 
+  pandoc.table(perftable, justify = perf_justify) 
+}
+
+#draw the matrix
+pretty_perf_table(t1model, dTrain1[selVars], dTrain1[,outcome]==pos, dTest1[selVars], dTest1[,outcome]==pos)
+
+pretty_perf_table(t2model, dTrain2[selVar2], dTrain2[,outcome]==pos, dTest2[selVar2], dTest2[,outcome]==pos)
+
+pretty_perf_table(t3model, dTrain3[selVar3], dTrain3[,outcome]==pos, dTest3[selVar3], dTest3[,outcome]==pos)
+
+```
+
+The results shows almost the same with AUC score: The prediction of the model, recall and F1 score are around 90%, which means the performance is extraordinary. For the deviance normalization, the value is also very low, and model 2 and 3 are slightly higher.
+
+#### 2.3.1.3 The Plot for Comparing performance
+
+```{r}
+plot_roc <- function(predcol1, outcol1, predcol2, outcol2,predcol3, outcol3)
+  { roc_1 <- rocit(score=predcol1, class=outcol1==pos) 
+  roc_2 <- rocit(score=predcol2, class=outcol2==pos)
+  roc_3 <- rocit(score=predcol3, class=outcol3==pos)
+  plot(roc_1, col = c("blue","green"), lwd = 3, legend = FALSE,YIndex = FALSE, values = TRUE, asp=1) 
+  
+  lines(roc_2$TPR ~ roc_2$FPR, lwd = 3, col = c("red","green"), asp=1) 
+  
+  lines(roc_3$TPR ~ roc_3$FPR, lwd = 3, col = c("yellow","green"), asp=1) 
+  
+  legend("bottomright", col = c("blue","red","yellow", "green"), c("combination 1","combination 2", "combination 3", "Null Model"), lwd = 2) 
+}
+
+pred_model3_roc <- predict(t3model, newdata=dTest3) 
+pred_model2_roc <- predict(t2model, newdata=dTest2)
+pred_model1_roc <- predict(t1model, newdata=dTest1)
+
+plot_roc(pred_model1_roc, dTest1[[outcome]],
+         pred_model2_roc, dTest2[[outcome]],
+         pred_model3_roc, dTest3[[outcome]])
+```
+
+The plot shows almost the same information as above, which indicates that t2model and t3model are better than t1model.
+
+#### 2.3.1.4 The Explanation of the Model
+
+```{r}
+#plot decision tree for 3 different combination
+par(cex=1.5) 
+rpart.plot(t1model)
+```
+
+```{r}
+rpart.plot(t2model)
+```
+
+```{r}
+rpart.plot(t3model)
+```
+
+Obviously, "region", "last_month_view", "subscribers_for_last_30_days_isBAD" performed significant roles in the tree graphs. Besides, the 3 trees are almost the same, which means the hypothesis mentioned above is true: only 2 to 3 features are actually used in the decision tree model.
+
+The higher performance from model 2 and 3 might come from the difference (on "subscribers_for_last_30_days_isBAD") between the trees, which means the model could be more accurate if the missing values is recognised.
+
+From the implies of the results, the Youtubers from Europe, Middle East, North America and have higher "views last month" could easily achieve high income.
+
+### 2.3.2 XGBoost Model
+
+XGBoost(Extreme Gradient Boosting) is a powerful model which is well-known by it's high performance in many competitions. It is designed for enhance the speed and performance of Gradient Boosted Trees. The models trained by this machine learning method will also be used for comparison with other two models.
+
+The XGBoost Model process was divided into parts including:
+
+1.  The creation of models and it's AUC evaluation for each feature combination
+2.  The performance evaluation of the three models (precision, recall, f1, dev.norm)
+3.  The explanation of the model and the plot for feature weight
+
+#### 2.3.2.1 The Model Creation
+
+The XGBoost model training is also similar to other machine learning methods, however, matrix data is required for the training rather than data frame. Therefore, the project converts all categorical data into numerical one for the process.
+
+```{r}
+#conver the data type
+convert_region_to_integer <- function(data) {
+  data$region <- as.integer(as.factor(data$region))
+  return(data)
+}
+#use the function above to convert region from charater to integer
+dTrain_int1 <- convert_region_to_integer(dTrain1)
+dTest_int1 <- convert_region_to_integer(dTest1)
+dCal_int1 <- convert_region_to_integer(dCal1)
+
+dTrain_int2 <- convert_region_to_integer(dTrain2)
+dTest_int2 <- convert_region_to_integer(dTest2)
+dCal_int2 <- convert_region_to_integer(dCal2)
+
+dTrain_int3 <- convert_region_to_integer(dTrain3)
+dTest_int3 <- convert_region_to_integer(dTest3)
+dCal_int3 <- convert_region_to_integer(dCal3)
+
+#transform the data frame as matrix
+matCal1 <- as.matrix(dCal_int1[, !names(dCal_int1) %in% c("income_class")])
+matTrain1 <- as.matrix(dTrain_int1[, !names(dTrain_int1) %in% c("income_class")])
+matTest1 <- as.matrix(dTest_int1[, !names(dTest_int1) %in% c("income_class")])
+
+matCal2 <- as.matrix(dCal_int2[, !names(dCal_int2) %in% c("income_class")])
+matTrain2 <- as.matrix(dTrain_int2[, !names(dTrain_int2) %in% c("income_class")])
+matTest2 <- as.matrix(dTest_int2[, !names(dTest_int2) %in% c("income_class")])
+
+matCal3 <- as.matrix(dCal_int3[, !names(dCal_int3) %in% c("income_class")])
+matTrain3 <- as.matrix(dTrain_int3[, !names(dTrain_int3) %in% c("income_class")])
+matTest3 <- as.matrix(dTest_int3[, !names(dTest_int3) %in% c("income_class")])
+
+```
+
+```{r}
+#define xgboost function as xgbooost
+xgbooost = function(variable_matrix, labelvec) {
+  cv <- xgb.cv(variable_matrix, label = labelvec,
+               params=list(
+                 objective="binary:logistic"
+               ),
+               nfold=5,
+               nrounds=100,
+               print_every_n=10,
+               metrics="logloss")
+
+  evalframe <- as.data.frame(cv$evaluation_log)
+  NROUNDS <- which.min(evalframe$test_logloss_mean)
+
+  model <- xgboost(data=variable_matrix, label=labelvec,
+                   params=list(
+                     objective="binary:logistic"
+                   ),
+                   nrounds=NROUNDS,
+                   verbose=FALSE)
+  model
+}
+
+```
+
+#### 2.3.2.2 The Performance of Models
+
+```{r}
+# define AUC function for XGboost
+calculate_auc <- function(model, mat_data, actual_labels, dataset_name) {
+  pred_prob <- predict(model, newdata = mat_data)
+  auc_val <- calcAUC(pred_prob, actual_labels)
+  cat("AUC for", dataset_name, ": ", auc_val, "\n")
+  return(auc_val)
+}
+# train the model
+model1 <- xgbooost(matTrain1, dTrain1$income_class)
+model2 <- xgbooost(matTrain2, dTrain2$income_class)
+model3 <- xgbooost(matTrain3, dTrain3$income_class)
+# calculate the AUC with the function defined above
+auc_train1 <- calculate_auc(model1, matTrain1, dTrain1$income_class, "Training 1")
+auc_cal1 <- calculate_auc(model1, matCal1, dCal1$income_class, "Calibration 1")
+auc_test1 <- calculate_auc(model1, matTest1, dTest1$income_class, "Test 1")
+
+auc_train2 <- calculate_auc(model2, matTrain2, dTrain2$income_class, "Training 2")
+auc_cal2 <- calculate_auc(model2, matCal2, dCal2$income_class, "Calibration 2")
+auc_test2 <- calculate_auc(model2, matTest2, dTest2$income_class, "Test 2")
+
+auc_train3 <- calculate_auc(model3, matTrain3, dTrain3$income_class, "Training 3")
+auc_cal3 <- calculate_auc(model3, matCal3, dCal3$income_class, "Calibration 3")
+auc_test3 <- calculate_auc(model3, matTest3, dTest3$income_class, "Test 3")
+
+```
+
+From the AUC scores the second one has better performance on calibration data. However, it is not enough to just compare the AUC score here, a further analysis is processed below to get more indicators.
+
+```{r}
+# define the function for XGBoost performance
+performanceMeasures <- function(ytrue, ypred_prob, model.name = "model", threshold=0.5) {
+  ypred <- ifelse(ypred_prob > threshold, 1, 0)
+  
+  # compute the normalised deviance 
+  dev.norm <- -2 * logLikelihood(ytrue, ypred_prob)/length(ypred_prob) 
+  # compute the confusion matrix 
+  cmat <- table(actual = ytrue, predicted = ypred) 
+  accuracy <- sum(diag(cmat)) / sum(cmat) 
+  precision <- cmat[2, 2] / sum(cmat[, 2]) 
+  recall <- cmat[2, 2] / sum(cmat[2, ]) 
+  f1 <- 2 * precision * recall / (precision + recall) 
+  data.frame(model = model.name, 
+             precision = precision, recall = recall, f1 = f1, dev.norm = dev.norm)
+}
+
+
+panderOpt <- function(){
+  panderOptions("plain.ascii", TRUE) 
+  panderOptions("keep.trailing.zeros", TRUE) 
+  panderOptions("table.style", "simple")
+}
+
+# pretty_perf_table
+pretty_perf_table <- function(model, xtrain, ytrain, xtest, ytest, threshold=0.5) {
+  # Option setting for Pander 
+  panderOpt()
+  perf_justify <- "lrrrr" 
+  # call the predict() function to do the predictions
+  pred_train <- predict(model, newdata=xtrain) 
+  pred_test <- predict(model, newdata=xtest) 
+  # comparing performance on training vs. test 
+  trainperf_df <- performanceMeasures(ytrain, pred_train, model.name="training", threshold=threshold)
+  testperf_df <- performanceMeasures(ytest, pred_test, model.name="test", threshold=threshold)
+  # combine the two performance data frames using rbind() 
+  perftable <- rbind(trainperf_df, testperf_df) 
+  pandoc.table(perftable, justify = perf_justify) 
+}
+
+
+
+pretty_perf_table(model1, matTrain1, dTrain_int1$income_class, matTest1, dTest_int1$income_class)
+
+
+pretty_perf_table(model2, matTrain2, dTrain_int2$income_class, matTest2, dTest_int2$income_class)
+
+pretty_perf_table(model3, matTrain3, dTrain_int3$income_class, matTest3, dTest_int3$income_class)
+
+```
+
+From these data, the second model still has the best performance on the test data for all of the scores. It would be selected for further explanation.
+
+#### 2.3.2.3 Explanation with LIME
+
+LIME is a interepter tool for explaning the model
+
+```{r warning=FALSE}
+explainer <- function(model, variable_matrix) {
+  explainer <- lime(as.data.frame(variable_matrix), model)
+  explanation <- explain(as.data.frame(variable_matrix)[1:4,], explainer, n_labels = 1, n_features = 5)
+  explanation
+}
+explanation2 <- explainer(model2, matTrain2)
+print(explanation2)
+plot_features(explanation2)
+
+```
+
+```{r}
+# use the xg.importance to show the distribution of feature weight
+importances <- xgb.importance(model = model2)
+xgb.plot.importance(importances)
+```
+
+The LIME model returns the first 4 observations, it is clear to see how features effect on the predictions. From the data from LIME and the xgb plot, "last_month_view" and "region" have the highest feature weight value, which means both act as important roles in this model. Between them, the "last month view" has slight higher impacts on the target variable than "Region".
+
+Sadly, as XGBoost is not fully a black-box model, it can not be explained clearly like decision tree.
+
+### 2.3.3 Logistic Regression
+
+The Logistic Regression Model is a machine learning method to calculate the probability of a certain class. It produces a S-shaped curve for the regression and estimate the probability with the math formula.
+
+The Logistic Regression Model process is divided into parts including:
+
+1.  (Refresh the data) The creation of model and it's AUC evaluation for each feature combination
+2.  The plot and performance evaluation of the three models (precision, recall, f1, dev.norm)
+3.  Use Caret to do this again and explain the model with LIME
+
+#### 2.3.3.1 The Model Creation
+
+```{r}
+#refresh the data
+dTrain1 <- dTrain %>%
+  select(all_of(c(selVars, outcome)))
+dTrain2 <- dTrain %>%
+  select(all_of(c(selVar2, outcome)))
+dTrain3 <- dTrain %>%
+  select(all_of(c(selVar3, outcome)))
+
+dTest1 <- dTest %>%
+  select(all_of(c(selVars, outcome)))
+dTest2 <- dTest %>%
+  select(all_of(c(selVar2, outcome)))
+dTest3 <- dTest %>%
+  select(all_of(c(selVar3, outcome)))
+
+dCal1 <- dCal %>%
+  select(all_of(c(selVars, outcome)))
+dCal2 <- dCal %>%
+  select(all_of(c(selVar2, outcome)))
+dCal3 <- dCal %>%
+  select(all_of(c(selVar3, outcome)))
+
+```
+
+```{r warning=FALSE}
+#logistic regression
+f <- paste(outcome,'~ ', paste(selVars, collapse=' + '), sep='') 
+cat(f)
+cat("Feature dimension = ", length(selVars)) 
+gmodel1 <- glm(as.formula(f), data=dTrain1, family=binomial(link='logit')) 
+
+print(calcAUC(predict(gmodel1, newdata=dTrain1), dTrain1[,outcome] )) 
+print(calcAUC(predict(gmodel1, newdata=dTest1), dTest1[,outcome] ))
+print(calcAUC(predict(gmodel1, newdata=dCal1), dCal1[,outcome] )) 
+
+f <- paste(outcome,'~ ', paste(selVar2, collapse=' + '), sep='') 
+cat(f)
+cat("Feature dimension = ", length(selVar2)) 
+
+gmodel2 <- glm(as.formula(f), data=dTrain2, family=binomial(link='logit')) 
+
+print(calcAUC(predict(gmodel2, newdata=dTrain2), dTrain2[,outcome] )) 
+print(calcAUC(predict(gmodel2, newdata=dTest2), dTest2[,outcome] ))
+print(calcAUC(predict(gmodel2, newdata=dCal2), dCal2[,outcome] )) 
+
+f <- paste(outcome,'~ ', paste(selVar3, collapse=' + '), sep='') 
+cat(f)
+cat("Feature dimension = ", length(selVar3)) 
+gmodel3 <- glm(as.formula(f), data=dTrain3, family=binomial(link='logit')) 
+
+print(calcAUC(predict(gmodel3, newdata=dTrain3), dTrain3[,outcome] )) 
+print(calcAUC(predict(gmodel3, newdata=dTest3), dTest3[,outcome] ))
+print(calcAUC(predict(gmodel3, newdata=dCal3), dCal3[,outcome] )) 
+
+```
+
+The modeling processing is almost the same with decision tree but the AUC values are almost reach 1. From the AUC score above, the second logistic regression model is better based on the result of the test data of model 2. A further analysis will also be processed later with other evaluation indicators.
+
+#### 2.3.3.2 The plot and performance evaluation (precision, recall, f1, dev.norm)
+
+```{r}
+pred_gmodel3_roc <- predict(gmodel3, newdata=dTest3) 
+pred_gmodel2_roc <- predict(gmodel2, newdata=dTest2)
+pred_gmodel1_roc <- predict(gmodel1, newdata=dTest1)
+
+plot_roc(pred_gmodel1_roc, dTest1[[outcome]],
+         pred_gmodel2_roc, dTest2[[outcome]],
+         pred_gmodel3_roc, dTest3[[outcome]])
+```
+
+The plot shows how these 3 models performed. However, this is not enough to evaluate the model because the plot is not well enough to show the difference due to the blurred edges of lines. So we need to use the performance matrix to compare the models.
+
+```{r warning=FALSE}
+
+pretty_perf_table(gmodel1, dTrain1[selVars], dTrain1[,outcome]==pos, dTest1[selVars], dTest1[,outcome]==pos)
+
+pretty_perf_table(gmodel2, dTrain2[selVar2], dTrain2[,outcome]==pos, dTest2[selVar2], dTest2[,outcome]==pos)
+
+pretty_perf_table(gmodel3, dTrain3[selVar3], dTrain3[,outcome]==pos, dTest3[selVar3], dTest3[,outcome]==pos)
+
+```
+
+From the statistics above, the second one is still the best, which would be selected for the following explanation.
+
+#### 2.3.3.3 The Logistic Regression with caret package and explained with LIME
+
+Because LIME does not support glm(logit) function, an alternative way to train the logistic regression is require for the interpretation. In this case, caret package is used for the model training.
+
+```{r warning=FALSE}
+#caret glm
+
+# Function to calculate AUC using ROCR
+calcAUC_ROCR <- function(preds, truth) {
+  pred_obj <- prediction(preds, truth)
+  perf_obj <- performance(pred_obj, measure = "auc")
+  return(perf_obj@y.values[[1]])
+}
+
+
+# Model 1
+f1 <- as.formula(paste(outcome,'~ ', paste(selVars, collapse=' + ')))
+cat(deparse(f1))
+cat("Feature dimension = ", length(selVars))
+gmodel1_caret <- train(f1, data=dTrain1, method="glm", family=binomial(link='logit'))
+print(calcAUC_ROCR(predict(gmodel1_caret, dTrain1), dTrain1[,outcome]))
+print(calcAUC_ROCR(predict(gmodel1_caret, dTest1), dTest1[,outcome]))
+print(calcAUC_ROCR(predict(gmodel1_caret, dCal1), dCal1[,outcome]))
+
+# Model 2
+f2 <- as.formula(paste(outcome,'~ ', paste(selVar2, collapse=' + ')))
+cat(deparse(f2))
+cat("Feature dimension = ", length(selVar2))
+gmodel2_caret <- train(f2, data=dTrain2, method="glm", family=binomial(link='logit'))
+print(calcAUC_ROCR(predict(gmodel2_caret, dTrain2), dTrain2[,outcome]))
+print(calcAUC_ROCR(predict(gmodel2_caret, dTest2), dTest2[,outcome]))
+print(calcAUC_ROCR(predict(gmodel2_caret, dCal2), dCal2[,outcome]))
+
+# Model 3
+f3 <- as.formula(paste(outcome,'~ ', paste(selVar3, collapse=' + ')))
+cat(deparse(f3))
+cat("Feature dimension = ", length(selVar3))
+gmodel3_caret <- train(f3, data=dTrain3, method="glm", family=binomial(link='logit'))
+print(calcAUC_ROCR(predict(gmodel3_caret, dTrain3), dTrain3[,outcome]))
+print(calcAUC_ROCR(predict(gmodel3_caret, dTest3), dTest3[,outcome]))
+print(calcAUC_ROCR(predict(gmodel3_caret, dCal3), dCal3[,outcome]))
+
+```
+
+From the same AUC scores, these 3 models could be authorized that they are the same with the 3 before.
+
+For the model interpretation, LIME and model 2 would be selected to show how this works.
+
+```{r warning=FALSE}
+explainer2 <- lime(dTrain2, gmodel2_caret, bin_continuous = TRUE)
+observation2 <- dTest2[1:4, !(names(dTest2) %in% c("income_class"))]
+
+explanation2 <- explain(observation2, explainer2, n_features = 7)  
+print(explanation2)
+
+plot_features(explanation2)
+```
+
+From the LIME explainer, the feature weight of last_month_view，view and numeric_date have negative scores in the first observation, which means they have no good effects on the model. "Region" and "last_month_view" has the largest feature weights which means they are the most important feature in the first observation.
+
+```{r}
+vip_plot <- vip(gmodel2_caret, num_features = 13)
+print(vip_plot)
+```
+
+From the plot for variable importance, the "region" feature was automatically divided into several "0" or "1" features for processing. It still indicates that "region" and "last_month_view" are the most important features in the model.
+
+## 2.4 Evaluation for All Models
+
+#### 2.4.1 Performance Comparison
+
+After the process above, 3 models are selected from 9 combinations which have the best performance from each multiple variable classification model.
+
+In this phase, 1 out of 3 models will be selected by considering their final performance. The performance will be evaluated by 2 section:
+
+1.  deviation norm, f1, precision and recall (show as comparison chart)
+2.  ROC plot (show as chart)
+
+```{r warning=FALSE}
+#Evalution Matrix  and visualization
+pretty_perf_table <- function(model, xtrain, ytrain, xtest, ytest, threshold=0.5) {
+  # Option setting for Pander 
+  panderOpt()
+  perf_justify <- "lrrrr" 
+  # call the predict() function to do the predictions
+  pred_train <- predict(model, newdata=xtrain) 
+  pred_test <- predict(model, newdata=xtest) 
+  # comparing performance on training vs. test 
+  trainperf_df <- performanceMeasures( ytrain, pred_train, model.name="training", threshold=threshold)
+  testperf_df <- performanceMeasures( ytest, pred_test, model.name="test", threshold=threshold)
+  # combine the two performance data frames using rbind() 
+  perftable <- rbind(trainperf_df, testperf_df) 
+  return(perftable)
+}
+#LOGISTIC
+perf1 <- pretty_perf_table(gmodel3, dTrain3[selVar3], dTrain3[,outcome]==pos, dTest3[selVar3], dTest3[,outcome]==pos)
+#DECISION TREE
+perf2 <- pretty_perf_table(t2model, dTrain2[selVar2], dTrain2[,outcome]==pos, dTest2[selVar2], dTest2[,outcome]==pos)
+#XGBOOST
+perf3 <- pretty_perf_table(model2, matTrain2, dTrain2$income_class, matTest2, dTest2$income_class)
+
+perf1$model_type <- "Logistic Regression #3"
+perf2$model_type <- "Decision Tree #2"
+perf3$model_type <- "XGBoost #2"
+
+perf1_test <- subset(perf1, model == "test")
+perf2_test <- subset(perf2, model == "test")
+perf3_test <- subset(perf3, model == "test")
+
+all_perf_test <- rbind(perf1_test, perf2_test, perf3_test)
+
+all_perf_long <- gather(all_perf_test, metric, value, -model_type, -model)
+
+
+ggplot(all_perf_long, aes(x=model_type, y=value, color=model_type)) +
+  geom_point(size=4, position=position_dodge(0.6)) +
+  facet_wrap(~metric, scales="free_y", ncol=1) +
+  labs(title="Test Data Performance", y="Value") +
+  theme_minimal() +
+  theme(legend.position="right")
+
+```
+
+This point plot is designed for checking the performance of each model by the data from evaluations on test data before, which clearly shows which one have the better performance on each criteria.
+
+-   For the f1 score, XGBoost #2 has the highest score, followed by Logistic Regression #3 and then Decision Tree #2.
+
+-   In terms of precision, Logistic Regression #3 leads, followed closely by XGBoost #2, with Decision Tree #2 lagging slightly behind.
+
+-   When looking at recall, Decision Tree #2 and XGBoost #2 have comparable scores, both being higher than that of Logistic Regression #3.
+
+-   From the dev.norm, Decision Tree #2 and XGBoost #2 have better performance than that of Logistic Regression #3.
+
+From the plot above, XGBoost #2 model distinctively has the best performance of all models.
+
+```{r message=FALSE, warning=FALSE}
+#ROC plot
+roc_decision_tree <- roc(dTest3[,outcome], predict(t3model, newdata=dTest3))
+roc_xgboost2 <- roc(dTest2$income_class, predict(model2, newdata=matTest2))
+roc_logistic_regression <- roc(dTest2[,outcome], as.numeric(predict(gmodel2_caret, dTest2)))
+
+ggroc(list(Decision_Tree_3=roc_decision_tree, XGBoost_2=roc_xgboost2, LogisticRegression_2=roc_logistic_regression))
+
+```
+
+The ROC curve also shown that XGBoost #2 is the best model of all.
+
+#### 2.4.2 Summary
+
+According to our best model, The most significant feature is "last_month_view", followed by "region", which implies that the number of views from the last month and the region have notable impact on the classification. Other features like "views", "uploads" and "numeric_date" have a relatively lower importance to the model.
+
+Therefore, based all parts of classification, the best model out of 9 sets is XGboost with the second variable combination selected from Boruta Algorithm, the variables selected are: "region", "views", "uploads","last_month_view", "last_month_subscribe", "subscribers_for_last_30_days_isBAD", "numeric_date","subscribers_for_last_30_days_isBAD" 7 in total.
+
+# 3. Clustering
+
+Clustering is an unsupervised method. In this method, no target variable is required, and the algorithm will group all the observations into several groups, meanwhile keep a good performance as the specific assessment method.
+
+The clustering part will be divided as following steps:
+
+1.  Preparation for the clustering data
+2.  Hierarchical Clustering (H Clustering)
+3.  K-mean Clustering
+4.  Interpenetration and summary
+
+## 3.1 Data Provision
+
+```{r}
+#set a new data set for clustering, extracvt the valid vairbales from the processed df
+df.cluster <- df[,c(catvars,numvars)]
+```
+
+```{r}
+#group the variables into numeric and category based on the type
+cluster.catvars <- colnames(df.cluster)[sapply(df.cluster[, colnames(df.cluster)], class) %in%
+c('factor', 'character')]
+cluster.numvars <- colnames(df.cluster)[sapply(df.cluster[, colnames(df.cluster)], class) %in%
+c('numeric', 'integer')]
+#check the varibales
+cluster.catvars
+cluster.numvars
+```
+
+For the clustering data frame, there are 2 category variables and 7 numeric variables. In the previous steps, the data cleaning and transformation has cleaned and dropped some meaningless and redundant variables, delete or fill some noise or missing value, reduce levels in category variables to keep the model tidy. These will help the further process greatly.
+
+However, as the clustering methods used have some limitation on the format of variable, further process will be applied:
+
+1.  Convert all category variables to numeric dummy variables, it will help the model to calculate the distance between data points. Then delete all categorical ones to keep data integrity.
+2.  Scale the numeric variables. Each unit change in the variable may cause the change in the final difference in a different level. While ideally, same level of different change is easier to observe and illustrate the impacts bring from each variables. Therefore, scale the numeric variable into a form with 0 as the mean, 1 as the standard deviation.
+
+```{r}
+#convert category variables to dummy
+dummy_vars <- model.matrix(~ . - 1, data = df.cluster[, cluster.catvars])
+df.cluster <- df.cluster[, -which(names(df.cluster) %in% cluster.catvars)]
+df.cluster <- cbind(df.cluster, dummy_vars)
+colnames(df.cluster) <- gsub("(.*)\\((.*)\\)", "\\2_\\1", colnames(df.cluster))
+
+#delete all cate variables
+df.cluster$cluster.catvars <- NULL
+```
+
+```{r}
+#Scale all of the numeric columns in df.clustering
+vars.to.use <- colnames(df.cluster)
+
+scaled_df <- scale(df.cluster[,vars.to.use])
+```
+
+```{r}
+#Check the centre and sd of the vriables after scaling
+attr(scaled_df, "scaled:center")
+attr(scaled_df, "scaled:scale")
+```
+
+## 3.2 Hierarchical Clustering
+
+The first clustering method is called hierarchical clustering. This method using hierarchical method to approach the best performed clustering. In this project, divisive method (top-down) will be used to separate all the data points from 1 to many.
+
+The logic under the method is Ward's method, which will minimize the distance among data points within same cluster/group. The distance calculation will follow the Euclidean distance.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+#calculate the Euclidean distance of data points first
+(d <- dist(scaled_df, method="euclidean"))
+```
+
+```{r}
+#set the method of minimise the distance
+pfit <- hclust(d, method="ward.D2")
+```
+
+### 3.2.1 Assess of H Clustering
+
+In order to make the distance for points inside one group is as small as possible, a indicator to assess the distance will be built, and then try from K=1 to K=n to see when the model can obtain the best indicator number, that would be the number of groups that H-clustering can perform the best.
+
+For the assessment, there are two different indicators will be calculated:
+
+1.  WSS (with sum of squares) will be counted and also the total of WSS, which will decrease as the number of groups increase. That is because more groups are divided, the distance between points will be tighter. In the line chart of total WSS, it will show an elbow curve, where the best K value could be find at the highest value of indicator.
+2.  Calinski-Harabasz index (CH index) will calculate total sum of squares (TSS) of distance from points to central point of each cluster; between sum of squares (BSS) of the distance among each different clusters. CH = (BSS/(K-1))/(WSS/(n-k)), it stands for: a good clustering has the smallest distance for the points inside of one cluster and has biggest distance between different clusters.
+
+In the project, both assess methods will be tried.
+
+```{r}
+#define the fucntion of distance square 
+sqr_euDist <- function(x,y) {
+  sum((x - y)^2)}
+```
+
+```{r}
+#define function of WSS, WSS total, TSS
+wss <- function(clustermat) {
+c0 <- colMeans(clustermat)
+sum(apply( clustermat, 1, FUN=function(row) {sqr_euDist(row, c0)} )) }
+
+wss_total <- function(scaled_df, labels) {
+wss.sum <- 0
+k <- length(unique(labels)) 
+for (i in 1:k)
+  wss.sum <- wss.sum + wss(subset(scaled_df, labels == i)) 
+wss.sum
+}
+
+tss <- function(scaled_df) {
+wss(scaled_df) }
+```
+
+```{r}
+#define function of CH index
+CH_index <- function(scaled_df, kmax, method = "kmeans") {
+  if (!(method %in% c("kmeans", "hclust")))
+    stop("method must be one of c('kmeans', 'hclust')")
+
+  npts <- nrow(scaled_df)
+  wss.value <- numeric(kmax) 
+  wss.value[1] <- wss(scaled_df)
+
+  if (method == "kmeans") {
+    for (k in 2:kmax) {
+      clustering <- kmeans(scaled_df, k, nstart = 10, iter.max = 100) 
+      wss.value[k] <- clustering$tot.withinss
+    }
+  } else {
+    d <- dist(scaled_df, method = "euclidean") 
+    pfit <- hclust(d, method = "ward.D2")
+    for (k in 2:kmax) {
+      labels <- cutree(pfit, k = k)
+      wss.value[k] <- wss_total(scaled_df, labels) 
+    }
+  }
+
+  bss.value <- tss(scaled_df) - wss.value 
+  B <- bss.value / (0:(kmax-1))
+  W <- wss.value / (npts - 1:kmax)
+  
+  data.frame(k = 1:kmax, CH_index = B/W, WSS = wss.value)
+}
+
+```
+
+```{r warning=FALSE}
+# calculate and plot total WSS and CH index 
+crit.df <- CH_index(scaled_df, 50, method="hclust")
+#plot the total WSS
+fig1 <- ggplot(crit.df, aes(x=k, y=WSS), color="blue") + geom_point() + geom_line(colour="blue") + scale_x_continuous(breaks=1:50, labels=1:50) + theme(text=element_text(size=10))+labs(title = "Total WSS Plot")
+#plot the CH index
+fig2 <- ggplot(crit.df, aes(x=k, y=CH_index)) + geom_point() + geom_line(colour="red") + scale_x_continuous(breaks=1:50, labels=1:50) + labs(y="CH index") + theme(text=element_text(size=10))+ labs(title = "CH index Plot")
+
+fig1
+```
+
+```{r warning=FALSE}
+fig2
+```
+
+From the total WSS index, there is no significant elbow shape showed on the chart. However, in the CH index chart the elbow occurs when K=21. It indicates that when cluster all data points into 21 groups, the clustering perform best.
+
+### 3.2.2 Plot H Clustering with the Best k
+
+Here plot K=21 to see the clusters directly:
+
+```{r}
+#set the k as k=21 
+groups <- cutree(pfit, k=21)
+print_clusters <- function(df, groups, cols_to_print) { Ngroups <- max(groups)
+for (i in 1:Ngroups) {
+print(paste("cluster", i))
+print(df[groups == i, cols_to_print]) }
+}
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+#check the cluster of 21 groups, it might hard to show in the html document
+print_clusters(df.cluster, groups)
+```
+
+```{r}
+#to visualise the cluster, the dimension of the variables will be reduced to 2 (named principle component)
+princ <- prcomp(scaled_df) # Calculate the principal components of scaled_df 
+nComp <- 2
+project2D <- as.data.frame(predict(princ, newdata=scaled_df)[,1:nComp])
+hclust.project2D <- cbind(project2D, cluster=as.factor(groups))
+
+```
+
+```{r}
+# finding the convex hull
+find_convex_hull <- function(proj2Ddf, groups) {
+  do.call(rbind, 
+          lapply(unique(groups),
+                 FUN = function(c) {
+                   f <- subset(proj2Ddf, cluster==c);
+                   f[chull(f),]
+                 } 
+          )
+  )
+  }
+hclust.hull <- find_convex_hull(hclust.project2D, groups)
+```
+
+```{r warning=FALSE}
+#plot the clustering with k=21
+ggplot(hclust.project2D, aes(x=PC1, y=PC2)) +
+geom_point(aes(shape=cluster, color=cluster)) + 
+  geom_text(aes(label= '', color=cluster), hjust=0, vjust=1, size=3) + 
+  geom_polygon(data=hclust.hull, aes(group=cluster, fill=as.factor(cluster)),
+alpha=0.4, linetype=0) + theme(text=element_text(size=10))+
+  labs(title = "H-Clustering Plot (K=21)")
+```
+
+Although K=21 from the index indicates the model performs best, when the clusters are plotted, there is a mess and huge overlap among these groups. That may be traced from the low number of observations.
+
+Therefore, although H-clustering deliver an output with K=21, the performance is still far away from expectations, and it is hard to interpret some valuable information from it. Another clustering method will be conducted in the project.
+
+## 3.3 K Mean Clustering
+
+K-mean clustering is another method. In the process, a hyper-parameter k will be selected first as the number of clusters' centres, then arrange all the data points to the nearest centre. After that, from each group, calculate the actual centre and in the end, rearrange all data points to the new nearest centre.
+
+This process will be repeated many times until the centre keep stable. In the practice, calculation will applied for 100 times to minimize the contingency bring from the randomly chosed hyper-parameter - initial K.
+
+### 3.3.1 Initial k
+
+```{r}
+#prepare the data frame for K mean clustering
+df.kmean <- df.cluster[,c(cluster.numvars)]
+```
+
+```{r}
+#set the hyper parameter as 3, set run time as 100, and random starts as 100
+kbest.p <- 3
+kmClusters <- kmeans(df.kmean, kbest.p, nstart=100, iter.max=100)
+```
+
+```{r}
+#check the K centre and size
+kmClusters$centers
+```
+
+```{r}
+kmClusters$size
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+#have a glance on the 3 groups
+#As it is hard to show in HTML, just keep the code here
+groups <- kmClusters$cluster
+print_clusters(df.kmean, groups)
+
+```
+
+### 3.3.2 Assess of K-mean Clustering
+
+Similarly, there are also two assess methods to evaluate the clustering:
+
+1.  CH index just like previous one, higher index indicated better performance, highest corresponds the best K value.
+2.  Average silhouette width (ASW), higher index indicated better performance, just same as CH index.
+
+```{r}
+#run to pick the best K by CH index
+kmClustering.ch <- kmeansruns(df.kmean, krange=1:50, criterion="ch")
+kmClustering.ch$bestk
+```
+
+```{r}
+#run to pick the best K by Average silhouette width (AWS)
+kmClustering.asw <- kmeansruns(df.kmean, krange=1:50, criterion="asw") 
+kmClustering.asw$bestk
+```
+
+```{r}
+#draw plots for two methods
+kmCritframe <- data.frame(k=1:50, ch=kmClustering.ch$crit,
+                          asw=kmClustering.asw$crit) 
+fig1 <- ggplot(kmCritframe, aes(x=k, y=ch)) +
+  geom_point() +
+  geom_line(colour="red") + 
+  scale_x_continuous(breaks=1:50, labels=1:50) + 
+  labs(y="CH index", title="CH index Plot") + theme(text=element_text(size=10))
+fig2 <- ggplot(kmCritframe, aes(x=k, y=asw)) + geom_point() +
+  geom_line(colour="blue") + 
+  scale_x_continuous(breaks=1:50, labels=1:50) + 
+  labs(y="ASW", title="ASW Plot") + 
+  theme(text=element_text(size=10))
+fig1
+```
+
+```{r}
+fig2
+```
+
+After the process, K mean clustering finds out 3 best K by two evaluation methods.
+
+For the CH index, there is a local peak point as **K=10,** and there is a global peak as **K=16**
+
+For ASW, there is a notable global peak as **K=2.**
+
+### 3.3.3 Plot Clusters with the Best k Value
+
+Three charts will be plotted to visualize clustering with three different K (2, 10, and 16).
+
+```{r}
+fig <- c()
+kvalues <- c(2,10,16) 
+for (k in kvalues) {
+  groups <- kmeans(scaled_df, k, nstart=100, iter.max=100)$cluster
+  kmclust.project2D <- cbind(project2D, cluster=as.factor(groups))
+kmclust.hull <- find_convex_hull(kmclust.project2D, groups)
+assign(paste0("fig", k),
+ggplot(kmclust.project2D, aes(x=PC1, y=PC2)) + geom_point(aes(shape=cluster, color=cluster)) + geom_polygon(data=kmclust.hull, aes(group=cluster, fill=cluster),
+alpha=0.4, linetype=0) + labs(title = sprintf("K mean Clustering: k = %d", k)) +
+theme(legend.position="none", text=element_text(size=10))
+) }
+```
+
+```{r}
+fig2
+```
+
+```{r warning=FALSE}
+fig10
+```
+
+```{r warning=FALSE}
+fig16
+```
+
+```{r}
+kbest.p <- 2
+kmClusters <- kmeans(df.kmean, kbest.p, nstart=100, iter.max=100)
+groups <- kmClusters$cluster
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, results='hide'}
+#check the different clusters. It is hard to show in HTML, so will only show the code
+print_clusters(df.kmean, groups)
+```
+
+As shows in the clusters map with three different k, both k=10 and k=16 illustrate a mess and overlapped clustering. Comparing with these, chart with k=2 has a clearer clustering, which is relatively acceptable. However, there is still a huge area overlapped, which can be consider as low efficient clustering.
+
+## 3.4 Summary of Clustering
+
+In summary, both H clustering and K mean clustering do not reach an outstanding result: all the clusters are overlapped to some extend. That may caused by the limited quantity of observations or the noise of variables are high.
+
+4.  COnclusion & Shiny
+
+    Reference
+
+```{r}
+library(shiny)
+library(ggplot2)
+library(dplyr)
+library(ggthemes)
+library(ROCit)
+library(pROC)
+
+
+ui <- navbarPage(
+  title = "CITS4009 Project 2",
+  h5("Mingyu LIAN: 24046428 & Chensu YANG: 24035732"),
+  tabPanel(
+    "Single Variable Model Evaluation",
+    h3("ROC Plot for Single Variables", style = "color:Darkred"),
+    p("The ROC Plot shows the performance of each single variable model. There are 9 models in total will be compared, each of the model have its corresponding single variable. The closer the curve is to the top left corner, the better the model is."),
+    p("There is also a red point line shows the null model performance, which can be treated as the worst model. Normally, each of the single variable model should have a better performance than the null model, which means the curve should be above the red point line.
+      "),
+    h5("Please use the multi-select box to choose the variables you want to plot.",style = "color:grey"),
+    sidebarLayout(
+      sidebarPanel(
+        checkboxGroupInput("selected_columns", "Choose Variable to Plot:",
+                           choices = c("region", "lst mth view", "uploads", "lst mth subscribe","subscribers","views","Vtreat Missing","numeric date","category"),
+                           selected = c("region","lst mth view", "uploads", "lst mth subscribe")) ,
+        p('__________________________________'),
+        h4("Conclusion"),
+        p("From the observations, 4 variables: region, last month view, last month subcribe have notable better performance than other variables."),
+        tags$a(href="https://youtu.be/uQKxh1xiHzU?si=vuo7dlFLjMbL8sqK", "Click Here to Watch the Guide Video!")),
+      mainPanel(
+        plotOutput("ROC")
+      )
+    )
+  ),
+  tabPanel(
+    "Multi-Variable Models Evaluation",
+    h3("Model Indicators Comparison", style = "color:Darkred"),
+    p("This comparison chart compares the peformance of 3 classifiers with its best variables combination respectively on test set. They are: Decision Tree Classifier with Variable Combination 2, 
+    Logistic Regression Classifier with Variable Combination 3 and XGBoost Classifier with Variable Combination 2.Besides, There are 4 common used indicators in the charts, 
+      they are: dev.norm, f1, precision and recall. 
+      The higher the indicator value is, the better the model is."),
+    p("You can compare the performance of the 3 models by choosing the indicator you want to compare."),
+    
+    h5("Please use the Radio Point to choose which indicator you would like to compare",style = "color:grey"),
+    sidebarLayout(
+      sidebarPanel(
+        radioButtons("indicator", "Choose an Indicator:",
+                     choices = c("dev.norm", "f1", "precision", "recall"),
+                     selected = c("dev.norm")) ,
+        p('__________________________________'),
+        h4("Conclusion"),
+        p("From the observations, the third model (XGBoost Classifier with Variable Combination 2) has a reletively good performance, especially for f1 indicator. 
+          Therefore, we choose this set as the final best model"),
+        tags$a(href="https://youtu.be/uQKxh1xiHzU?si=vuo7dlFLjMbL8sqK", "Click Here to Watch the Guide Video!")),
+      mainPanel(
+        plotOutput("perfPlot")
+      )
+    )
+  ),
+  tabPanel(
+    "K-Means Clustering",
+    h3("Clustering Plot (Two-Dimensional Display)", style = "color:Darkred"),
+    p("This clustering plot shows the result of K-Means Clustering. The plot is a two-dimensional display of the data.
+      The x-axis is the first principal component, and the y-axis is the second principal component. 
+      The color of the points represents the cluster that the data point belongs to. The number of clusters is determined by the user. "),
+    
+    h5("Please use the slider choose the number of clusters you want to plot.",style = "color:grey"),
+    sidebarLayout(
+      sidebarPanel(
+        sliderInput("selectn", label="Choose k as clusters number:",
+                    min=2, max=10,value=2) ,
+        p('__________________________________'),
+        h4("Conclusion"),
+        p("From the evaluation method metioned in the report, 
+          the clustering perform best when k=2. When check the k=2, 
+          it shows a reletively clear clusters than k = others. However, there is still a huge overlap between two different clusters,
+          which indicates it might not a good clustering. The reason might be traced from the amount limitation of obersvations. Therefore, the clustering might not be a good method for this dataset."),
+        tags$a(href="https://youtu.be/uQKxh1xiHzU?si=vuo7dlFLjMbL8sqK", "Click Here to Watch the Guide Video!")),
+      mainPanel(
+        plotOutput("cluster")
+      )
+    )
+  )
+)
+
+
+server <- function(input, output) {
+  output$ROC <- renderPlot({
+    plot_roc <- function(predcol, outcol, colour_id=10, overlaid=F){ 
+      ROCit_obj <- rocit(score=predcol, class=outcol==pos) 
+      par(new=overlaid) 
+      plot(ROCit_obj, 
+           col = c(colour_id, 10), legend = FALSE, YIndex = FALSE, values = FALSE) 
+    }
+    
+    if ("region" %in% input$selected_columns)
+      plot_roc(shiny1$predregion, shiny1[,outcome],colour_id=1)  
+    if ("lst mth view" %in% input$selected_columns)
+      plot_roc(shiny1$predlast_month_view, shiny1[,outcome], colour_id=2, overlaid=T) 
+    if ("uploads" %in% input$selected_columns)
+      plot_roc(shiny1$preduploads, shiny1[,outcome],colour_id=3,overlaid=T) 
+    if ("lst mth subscribe" %in% input$selected_columns)
+      plot_roc(shiny1$predlast_month_subscribe, shiny1[,outcome], colour_id=4, overlaid=T)
+    if ("subscribers" %in% input$selected_columns)
+      plot_roc(shiny1$predsubscribers, shiny1[,outcome], colour_id=5, overlaid=T) 
+    if ("views" %in% input$selected_columns)
+      plot_roc(shiny1$predviews, shiny1[,outcome], colour_id=6, overlaid=T) 
+    if ("Vtreat Missing" %in% input$selected_columns)
+      plot_roc(shiny1$predsubscribers_for_last_30_days_isBAD, shiny1[,outcome], colour_id=7, overlaid=T) 
+    if ("numeric date" %in% input$selected_columns)
+      plot_roc(shiny1$prednumeric_date, shiny1[,outcome], colour_id=8, overlaid=T) 
+    if ("category" %in% input$selected_columns)
+      plot_roc(shiny1$predcategory, shiny1[,outcome], colour_id=13, overlaid=T)
+    
+    legend("bottomright", legend = input$selected_columns, col = 1:(length(input$selected_columns) + 1), lty = 1)
+  })
+  
+  output$cluster <- renderPlot({
+    k <- input$selectn
+    groups <- kmeans(scaled_df, k, nstart=100, iter.max=100)$cluster
+    kmclust.project2D <- cbind(project2D, cluster=as.factor(groups))
+    kmclust.hull <- find_convex_hull(kmclust.project2D, groups)
+    ggplot(kmclust.project2D, aes(x=PC1, y=PC2)) + geom_point(aes(shape=cluster, color=cluster)) +
+      geom_polygon(data=kmclust.hull, aes(group=cluster, fill=cluster), alpha=0.4, linetype=0) + 
+      labs(title = sprintf("Clustering Plot - K = %d", k)) +
+      scale_x_continuous(name = "Principal Component 1") + scale_y_continuous(name = "Principal Component 2") +
+      theme(legend.position="bottom", text=element_text(size=15),
+            plot.title = element_text(hjust = 0.5, size = 19, face = "bold",color="darkred"),  
+            axis.title.x = element_text(size = 13), axis.title.y = element_text(size = 13))
+  })
+  output$perfPlot <- renderPlot({
+    data_to_plot <- all_perf_long[all_perf_long$metric == input$indicator,]
+    ggplot(data_to_plot, aes(x=model_type, y=value, color=model_type)) +
+      geom_point(size=8, position=position_dodge(0.8),show.legend = FALSE) +
+      labs(title="Indicator Performance for 3 Classifiers", y="Indicator Value",x="") +
+      theme_minimal() +
+      theme(legend.position="bottom",text=element_text(size=15),
+            plot.title = element_text(hjust = 0.5, size = 19, face = "bold",color="darkred"),  
+            axis.title.y = element_text(size = 16, face = "bold",color="darkgray"), axis.text.x = element_text(size = 15, face = "bold") ,axis.text.y = element_text(size = 15, face = "bold") )
+  })
+}
+
+shinyApp(ui = ui, server = server)
+
+```
